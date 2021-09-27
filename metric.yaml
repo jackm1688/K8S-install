@@ -1,0 +1,238 @@
+## APIService
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: v1beta1.metrics.k8s.io
+spec:
+  group: metrics.k8s.io
+  service:
+    name: metrics-server
+    namespace: kube-system
+  version: v1beta1
+  groupPriorityMinimum: 100
+  insecureSkipTLSVerify: true
+  versionPriority: 100
+
+---
+## ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: metrics-server
+  namespace: kube-system
+---
+## ClusterRole aggregated-metrics-reader
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:aggregated-metrics-reader
+  labels:
+    k8s-app: metrics-server
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+  - apiGroups: [ "metrics.k8s.io" ]
+    resources: [ "pods","nodes" ]
+    verbs: [ "get","list","watch" ]
+---
+## ClusterRole metrics-server
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:metrics-server
+  labels:
+    k8s-app: metrics-server
+rules:
+  - apiGroups: [ "" ]
+    resources: [ "pods","nodes","nodes/stats","namespaces","configmaps" ]
+    verbs: [ "get","list","watch" ]
+---
+## ClusterRoleBinding auth-delegator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metrics-server:system:auth-delegator
+  labels:
+    k8s-app: metrics-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: metrics-server
+    namespace: kube-system
+---
+## RoleBinding metrics-server-auth-reader
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: metrics-server-auth-reader
+  namespace: kube-system
+  labels:
+    k8s-app: metrics-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+  - kind: ServiceAccount
+    name: metrics-server
+    namespace: kube-system
+---
+## ClusterRoleBinding system:metrics-server
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system:metrics-server
+  labels:
+    k8s-app: metrics-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:metrics-server
+subjects:
+  - kind: ServiceAccount
+    name: metrics-server
+    namespace: kube-system
+---
+## Service
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: metrics-server
+  namespace: kube-system
+spec:
+  ports:
+    - name: https
+      port: 443
+      protocol: TCP
+      targetPort: https
+  selector:
+    k8s-app: metrics-server
+---
+## Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-server
+  namespace: kube-system
+  labels:
+    k8s-app: metrics-server
+spec:
+  selector:
+    matchLabels:
+      k8s-app: metrics-server
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+  template:
+    metadata:
+      name: metrics-server
+      labels:
+        k8s-app: metrics-server
+    spec:
+      hostNetwork: true
+      serviceAccountName: metrics-server
+      containers:
+        - name: metrics-server
+          image: bitnami/metrics-server:0.4.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --cert-dir=/tmp
+            - --secure-port=4443
+            - --kubelet-insecure-tls
+            - --kubelet-use-node-status-port
+            - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /livez
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /readyz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+          ports:
+            - name: https
+              containerPort: 4443
+              protocol: TCP
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+          resources:
+            limits:
+              memory: 1Gi
+              cpu: 1000m
+            requests:
+              memory: 1Gi
+              cpu: 1000m
+          volumeMounts:
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: localtime
+              readOnly: true
+              mountPath: /etc/localtime
+      volumes:
+        - name: tmp-dir
+          emptyDir: {}
+        - name: localtime
+          hostPath:
+            type: File
+            path: /etc/localtime
+      nodeSelector:
+        kubernetes.io/os: linux
+
+---
+{
+  "CN": "aggregator",
+  "hosts": [],
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "CN",
+      "ST": "SZ",
+      "L": "GD",
+      "O": "k8s",
+      "OU": "System"
+    }
+  ]
+}
+
+// cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes metrics-server-csr.json | cfssljson -bare metrics-server
+
+--requestheader-client-ca-file:ca 证书
+--requestheader-allowed-names:  客户端证书常用名称列表。允许在--requestheader-username-headers指定的标头中提供用户名，如果为空，则允许在--requestheader-client-ca文件中通过当局验证的任何客户端证书
+--requestheader-extra-headers-prefix:  要检查的请求标头前缀列表
+--requestheader-group-headers:  要检查组的请求标头列表
+--requestheader-username-headers:  要检查用户名的请求标头列表
+--proxy-client-cert-file:  用于证明aggregator或kube-apiserver在请求期间发出呼叫的身份的客户端证书
+--proxy-client-key-file:  用于证明聚合器或kube-apiserver的身份的客户端证书的私钥，当它必须在请求期间调用时使用。包括将请求代理给用户api-server和调用webhook admission插件
+
+
+
+--requestheader-client-ca-file=/data1/k8s_data/etc/kubernetes/ssl/ca.pem \
+--requestheader-allowed-names=aggregator \
+--requestheader-extra-headers-prefix=X-Remote-Extra- \
+--requestheader-group-headers=X-Remote-Group \
+--requestheader-username-headers=X-Remote-User \
+--enable-aggregator-routing=true \
+--proxy-client-cert-file=/data1/k8s_data/etc/kubernetes/ssl/metrics-server.pem \
+
+
