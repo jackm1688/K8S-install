@@ -1,0 +1,248 @@
+一，用rpm检查是否有nfs-utils的包已安装
+
+[root@localhost liuhongdi]# rpm -qa | grep nfs-utils
+nfs-utils-2.3.3-26.el8.x86_64
+
+二，如果没有安装，在centos平台如何安装nfs?
+
+[root@localhost liuhongdi]# dnf install nfs-utils
+
+三，如何启动nfs?
+
+[root@localhost liuhongdi]# systemctl start nfs-server
+
+四，如何查看当前nfs服务所支持的nfs的版本？
+
+[root@localhost liuhongdi]# cat /proc/fs/nfsd/versions
+-2 +3 +4 +4.1 +4.2
+说明：可以看到在nfs4的大版本下nfs2已经不被支持了
+
+五，配置要导出的文件系统：
+
+1,创建两个要共享的目录：
+
+[root@localhost data]# mkdir /data/nfs
+[root@localhost data]# cd /data/nfs
+[root@localhost nfs]# mkdir rw
+[root@localhost nfs]# mkdir ro
+
+2,切换两个目录的owner:
+
+[root@localhost nfs]# chown nginx.nginx *
+[root@localhost nfs]# ll
+总用量 0
+drwxr-xr-x 2 nginx nginx 6 2月 24 11:11 ro
+drwxr-xr-x 2 nginx nginx 6 2月 24 11:11 rw
+
+说明：切换owner为我们要用来访问此目录的用户，
+
+因为使用nginx访问，所以用户是nginx
+
+说明2：查看nginx用户的id信息：
+
+[root@localhost nfs]# cat /etc/passwd | grep nginx
+nginx❌973:973:Nginx web server:/var/lib/nginx:/sbin/nologin
+说明：973:973 分别是用户的id和所属组的id
+
+3,补充说明：如何手动创建一个nfs用户？
+
+[root@localhost nfs]# useradd -u 1100 -s /sbin/nologin -M nfsuser
+[root@localhost nfs]# id nfsuser
+uid=1100(nfsuser) gid=1100(nfsuser) 组=1100(nfsuser)
+
+说明：
+
+-u : 指定用户uid
+
+-M: --no-create-home 不创建用户home目录
+
+-s : --shell 指定用户的shell
+
+以上用法通过man命令可以了解到:
+
+[root@localhost nfs]# man useradd
+
+4，编辑配置文件：
+
+[root@localhost srv]# vi /etc/exports
+编辑的内容为:
+
+/data/nfs/rw 192.168.3.162(rw,sync,all_squash,anonuid=973,anongid=973)
+
+说明： /etc/exports是nfs默认的配置文件
+
+说明：各项权限的说明：
+
+rw:可读写
+
+ro: 只读
+
+no_root_squash：对root用户不压制，如果客户端以root用户写入，在服务端都映射为服务端的root用户
+
+root_squash： nfs服务：默认情况使用的是相反参数root_squash，
+
+                  如果客户端是用户root操作，会被压制成nobody用户
+1
+all_squash: 不管客户端的使用nfs的用户是谁，都会压制成nobody用户
+
+insecure: 允许从客户端过来的非授权访问
+
+sync: 数据同步写入到内存和硬盘
+
+async: 数据先写入内存，不直接写入到硬盘
+
+anonuid: 指定uid的值，此uid必须存在于/etc/passwd中
+
+anongid:指定gid的值
+
+5，配置完成后，如何使nfs配置生效？
+
+说明：完成设置后，使用exportfs实用程序有选择地导出目录，而无需重新启动NFS服务
+
+[root@localhost srv]# exportfs -rv
+exporting 192.168.3.162:/data/nfs/rw
+说明：exportfs的参数：
+
+-r: Reexport all directories: 重新导出所有目录
+
+-v: verbose,输出详情
+
+6,如何查看当前配置为nfs共享的目录及其状态?
+
+[root@localhost srv]# exportfs -v
+/data/nfs/rw 192.168.3.162(sync,wdelay,hide,no_subtree_check,anonuid=973,anongid=973,sec=sys,rw,secure,root_squash,all_squash)
+
+7,在本地做挂载测试:完整过程:
+
+[root@localhost srv]# vi /etc/exports
+说明：编辑内容：
+
+/data/nfs/rw 192.168.3.162(rw,sync,all_squash,anonuid=973,anongid=973)
+/data/nfs/ro 192.168.3.172(ro,sync,all_squash,anonuid=973,anongid=973)
+其中:192.168.3.172是本机ip,可以挂载到本地
+
+[root@localhost srv]# exportfs -rv
+exporting 192.168.3.172:/data/nfs/ro
+exporting 192.168.3.162:/data/nfs/rw
+复制代码
+[root@localhost srv]# mount 192.168.3.172:/data/nfs/ro /mnt
+[root@localhost mnt]# df -hT
+文件系统 类型 容量 已用 可用 已用% 挂载点
+devtmpfs devtmpfs 1.9G 0 1.9G 0% /dev
+tmpfs tmpfs 1.9G 0 1.9G 0% /dev/shm
+tmpfs tmpfs 1.9G 10M 1.9G 1% /run
+tmpfs tmpfs 1.9G 0 1.9G 0% /sys/fs/cgroup
+/dev/mapper/cl-root xfs 50G 6.5G 44G 13% /
+/dev/mapper/cl-home xfs 26G 521M 25G 3% /home
+/dev/sda1 ext4 976M 264M 646M 29% /boot
+tmpfs tmpfs 376M 1.2M 375M 1% /run/user/42
+tmpfs tmpfs 376M 4.6M 372M 2% /run/user/1000
+/dev/sr0 iso9660 6.7G 6.7G 0 100% /run/media/liuhongdi/CentOS-8-BaseOS-x86_64
+192.168.3.172:/data/nfs/ro nfs4 50G 6.5G 44G 13% /mnt
+复制代码
+
+六，客户端测试挂载nfs
+
+1,我们测试用的客户端是一台 fedora 30
+
+[root@localhost liuhongdi]# cat /etc/redhat-release
+Fedora release 30 (Thirty)
+
+2,查看服务端输出的目录:
+
+[root@localhost liuhongdi]# showmount -e 192.168.3.172
+Export list for 192.168.3.172:
+/data/nfs/ro 192.168.3.172
+/data/nfs/rw 192.168.3.162
+
+3,挂载到本地目录：
+
+复制代码
+[root@localhost liuhongdi]# mount -t nfs 192.168.3.172:/data/nfs/rw /mnt
+[root@localhost liuhongdi]# df -hT
+文件系统 类型 容量 已用 可用 已用% 挂载点
+devtmpfs devtmpfs 1.9G 0 1.9G 0% /dev
+tmpfs tmpfs 2.0G 0 2.0G 0% /dev/shm
+tmpfs tmpfs 2.0G 1.6M 2.0G 1% /run
+tmpfs tmpfs 2.0G 0 2.0G 0% /sys/fs/cgroup
+/dev/mapper/fedora_localhost–live-root ext4 50G 22G 25G 47% /
+tmpfs tmpfs 2.0G 4.0K 2.0G 1% /tmp
+/dev/mapper/fedora_localhost–live-home ext4 25G 3.3G 20G 15% /home
+/dev/sda1 ext4 976M 221M 688M 25% /boot
+tmpfs tmpfs 391M 40K 391M 1% /run/user/1000
+192.168.3.172:/data/nfs/rw nfs4 50G 6.4G 44G 13% /mnt
+复制代码
+
+4,使客户端和服务端的用户id保持一致？
+
+先查看本地nginx用户的id
+
+[root@localhost mnt]# grep nginx /etc/passwd
+nginx❌979:979:Nginx web server:/var/lib/nginx:/sbin/nologin
+把客户端的nginx用户id修改为和服务端一致:
+
+[root@localhost mnt]# usermod -u 973 nginx
+[root@localhost mnt]# groupmod -g 973 nginx
+[root@localhost mnt]# grep nginx /etc/passwd
+nginx❌973:973:Nginx web server:/var/lib/nginx:/sbin/nologin
+
+5,在客户端测试写入到nfs文件系统
+
+复制代码
+[root@localhost mnt]# touch e.txt
+[root@localhost mnt]# ll
+总用量 0
+-rw-r–r-- 1 root root 0 2月 24 14:03 a.txt
+-rw-r–r-- 1 nginx nginx 0 2月 24 14:15 b.txt
+-rw-r–r-- 1 nginx nginx 0 2月 24 14:18 c.txt
+-rw-r–r-- 1 root root 0 2月 24 14:18 d.txt
+-rw-r–r-- 1 nginx nginx 0 2月 24 14:21 e.txt
+[root@localhost mnt]# sudo -u nginx more e.txt
+[root@localhost mnt]# sudo -u nginx vi e.txt
+[root@localhost mnt]# sudo -u nginx more e.txt
+ccceee
+复制代码
+说明：可以写入，以root写入和以nginx用户写入，效果一样，
+
+      文件的owner都是nginx
+
+      而且客户端使用客户端的nginx用户也可以正常的读写所创建的文件
+
+6,生产环境中使用nfs4要注意的地方：
+
+nfs的客户端往往不止一台，应该在搭建时把使用nfs的用户的uid/gid设置一致
+
+避免读写时出现没有权限的错误
+
+七，客户端机器启动后能自动加载nfs文件系统：
+
+把mount命令：例如：mount -t nfs 192.168.3.172:/data/nfs/rw /mnt
+写入到 /etc/rc.local
+
+说明：有很多资料建议写入到/etc/fstab,
+
+     os启动时一般会先加载文件系统后启动网络，
+
+    在没有网络时nfs是无法加载的，总是出错，
+
+    所以还是建议放到/etc/rc.local中
+
+八，如何查看nfs服务的版本？
+
+1，客户端查看nfs服务的版本：
+
+[sysop@webserver2 ~]$ nfsstat -m
+2，服务端查看 nfs的版本
+
+[root@loadserver ~]# nfsstat -s
+3，客户端也可以用mount查看nfs服务的版本
+
+[sysop@webserver2 ~]$ mount -v
+4,如何查看nfsstat的帮助?
+
+[root@loadserver ~]# nfsstat --help
+
+九，查看本地centos的版本:
+
+[root@localhost lib]# cat /etc/redhat-release
+CentOS Linux release 8.1.1911 (Core)

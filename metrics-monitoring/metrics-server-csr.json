@@ -1,0 +1,37 @@
+{
+  "CN": "aggregator",
+  "hosts": [],
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "CN",
+      "ST": "SZ",
+      "L": "GD",
+      "O": "k8s",
+      "OU": "System"
+    }
+  ]
+}
+
+// cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes metrics-server-csr.json | cfssljson -bare metrics-server
+
+--requestheader-client-ca-file:ca 证书
+--requestheader-allowed-names:  客户端证书常用名称列表。允许在--requestheader-username-headers指定的标头中提供用户名，如果为空，则允许在--requestheader-client-ca文件中通过当局验证的任何客户端证书
+--requestheader-extra-headers-prefix:  要检查的请求标头前缀列表
+--requestheader-group-headers:  要检查组的请求标头列表
+--requestheader-username-headers:  要检查用户名的请求标头列表
+--proxy-client-cert-file:  用于证明aggregator或kube-apiserver在请求期间发出呼叫的身份的客户端证书
+--proxy-client-key-file:  用于证明聚合器或kube-apiserver的身份的客户端证书的私钥，当它必须在请求期间调用时使用。包括将请求代理给用户api-server和调用webhook admission插件
+
+
+
+--requestheader-client-ca-file=/data1/k8s_data/etc/kubernetes/ssl/ca.pem \
+--requestheader-allowed-names=aggregator \
+--requestheader-extra-headers-prefix=X-Remote-Extra- \
+--requestheader-group-headers=X-Remote-Group \
+--requestheader-username-headers=X-Remote-User \
+--enable-aggregator-routing=true \
+--proxy-client-cert-file=/data1/k8s_data/etc/kubernetes/ssl/metrics-server.pem \
